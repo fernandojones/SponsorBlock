@@ -72,17 +72,27 @@ if [ ! -d "$PROJECT_PATH" ]; then
 fi
 
 echo "==> Building macOS App (Release)..."
-xcodebuild \
+if ! xcodebuild \
   -project "$PROJECT_PATH" \
   -scheme "SponsorBlock for YouTube (macOS)" \
   -configuration Release \
   -derivedDataPath "$DERIVED_DATA" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
-  build
+  build; then
+  echo "==> Development team signing failed. Falling back to Ad-Hoc signing for macOS..."
+  xcodebuild \
+    -project "$PROJECT_PATH" \
+    -scheme "SponsorBlock for YouTube (macOS)" \
+    -configuration Release \
+    -derivedDataPath "$DERIVED_DATA" \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGN_STYLE=Manual \
+    build
+fi
 
 echo "==> Building iOS App (Release)..."
-xcodebuild \
+if ! xcodebuild \
   -project "$PROJECT_PATH" \
   -scheme "SponsorBlock for YouTube (iOS)" \
   -configuration Release \
@@ -90,7 +100,19 @@ xcodebuild \
   -derivedDataPath "$DERIVED_DATA" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
-  build
+  build; then
+  echo "==> Development team signing failed. Falling back to unsigned build for iOS (sideload-ready)..."
+  xcodebuild \
+    -project "$PROJECT_PATH" \
+    -scheme "SponsorBlock for YouTube (iOS)" \
+    -configuration Release \
+    -destination "generic/platform=iOS" \
+    -derivedDataPath "$DERIVED_DATA" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY="" \
+    build
+fi
 
 echo "==> Packaging macOS App..."
 MACOS_APP="$DERIVED_DATA/Build/Products/Release/SponsorBlock for YouTube.app"
