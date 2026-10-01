@@ -40,6 +40,10 @@ if [ ! -f "$ZIP_PATH" ]; then
   exit 1
 fi
 
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
+ZIP_PATH=$(cd "$(dirname "$ZIP_PATH")" && pwd)/$(basename "$ZIP_PATH")
+
 TEMP_DIR=$(mktemp -d -t sponsorblock-safari-XXXXXX)
 cleanup() {
   echo "==> Cleaning up temporary files..."
@@ -52,7 +56,7 @@ EXT_DIR="$TEMP_DIR/extension"
 XCODE_DIR="$TEMP_DIR/xcode"
 DERIVED_DATA="$TEMP_DIR/DerivedData"
 
-mkdir -p "$EXT_DIR" "$XCODE_DIR" "$OUTPUT_DIR"
+mkdir -p "$EXT_DIR" "$XCODE_DIR"
 
 echo "==> Unpacking SafariExtension.zip..."
 unzip -q "$ZIP_PATH" -d "$EXT_DIR"
