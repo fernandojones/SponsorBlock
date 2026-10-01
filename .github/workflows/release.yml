@@ -8,7 +8,7 @@ jobs:
 
   build:
     name: Upload Release
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       # Initialization
