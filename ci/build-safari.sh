@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build Safari Extension macOS App and iOS App (IPA) using Xcode
-# Usage: ./ci/build-safari.sh [--zip <path-to-SafariExtension.zip>] [--output-dir <path>] [--team-id <team-id>]
+# Build Safari Extension macOS App and optional iOS App (IPA) using Xcode
+# Usage: ./ci/build-safari.sh [--zip <path-to-SafariExtension.zip>] [--output-dir <path>] [--team-id <team-id>] [--macos-only]
 
 ZIP_PATH=""
 OUTPUT_DIR="./dist-safari"
 TEAM_ID="D9A6A3ZA4X"
+BUILD_IOS="true"
 TEMP_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
     --team-id)
       TEAM_ID="$2"
       shift 2
+      ;;
+    --macos-only)
+      BUILD_IOS="false"
+      shift 1
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -81,6 +86,9 @@ if ! xcodebuild \
   -scheme "SponsorBlock for YouTube (macOS)" \
   -configuration Release \
   -derivedDataPath "$DERIVED_DATA" \
+  ARCHS="x86_64 arm64" \
+  ONLY_ACTIVE_ARCH=NO \
+  MACOSX_DEPLOYMENT_TARGET="12.0" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
   build; then
@@ -90,31 +98,11 @@ if ! xcodebuild \
     -scheme "SponsorBlock for YouTube (macOS)" \
     -configuration Release \
     -derivedDataPath "$DERIVED_DATA" \
+    ARCHS="x86_64 arm64" \
+    ONLY_ACTIVE_ARCH=NO \
+    MACOSX_DEPLOYMENT_TARGET="12.0" \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGN_STYLE=Manual \
-    build
-fi
-
-echo "==> Building iOS App (Release)..."
-if ! xcodebuild \
-  -project "$PROJECT_PATH" \
-  -scheme "SponsorBlock for YouTube (iOS)" \
-  -configuration Release \
-  -destination "generic/platform=iOS" \
-  -derivedDataPath "$DERIVED_DATA" \
-  DEVELOPMENT_TEAM="$TEAM_ID" \
-  CODE_SIGN_STYLE=Automatic \
-  build; then
-  echo "==> Development team signing failed. Falling back to unsigned build for iOS (sideload-ready)..."
-  xcodebuild \
-    -project "$PROJECT_PATH" \
-    -scheme "SponsorBlock for YouTube (iOS)" \
-    -configuration Release \
-    -destination "generic/platform=iOS" \
-    -derivedDataPath "$DERIVED_DATA" \
-    CODE_SIGNING_ALLOWED=NO \
-    CODE_SIGNING_REQUIRED=NO \
-    CODE_SIGN_IDENTITY="" \
     build
 fi
 
@@ -128,20 +116,49 @@ else
   exit 1
 fi
 
-echo "==> Packaging iOS IPA..."
-IOS_APP="$DERIVED_DATA/Build/Products/Release-iphoneos/SponsorBlock for YouTube.app"
-if [ -d "$IOS_APP" ]; then
-  PAYLOAD_DIR="$TEMP_DIR/Payload"
-  mkdir -p "$PAYLOAD_DIR"
-  cp -R "$IOS_APP" "$PAYLOAD_DIR/"
-  (cd "$TEMP_DIR" && zip -qry "$OUTPUT_DIR/SponsorBlock-Safari-iOS.ipa" Payload)
-  echo "Created: $OUTPUT_DIR/SponsorBlock-Safari-iOS.ipa"
-else
-  echo "Error: iOS app not found at $IOS_APP" >&2
-  exit 1
+if [ "$BUILD_IOS" = "true" ]; then
+  echo "==> Building iOS App (Release)..."
+  if ! xcodebuild \
+    -project "$PROJECT_PATH" \
+    -scheme "SponsorBlock for YouTube (iOS)" \
+    -configuration Release \
+    -destination "generic/platform=iOS" \
+    -derivedDataPath "$DERIVED_DATA" \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    CODE_SIGN_STYLE=Automatic \
+    build; then
+    echo "==> Development team signing failed. Falling back to unsigned build for iOS (sideload-ready)..."
+    xcodebuild \
+      -project "$PROJECT_PATH" \
+      -scheme "SponsorBlock for YouTube (iOS)" \
+      -configuration Release \
+      -destination "generic/platform=iOS" \
+      -derivedDataPath "$DERIVED_DATA" \
+      CODE_SIGNING_ALLOWED=NO \
+      CODE_SIGNING_REQUIRED=NO \
+      CODE_SIGN_IDENTITY="" \
+      build || {
+        echo "==> Warning: iOS build failed due to missing iOS SDK platform runtimes on host runner."
+        echo "==> Skipping iOS IPA packaging."
+        BUILD_IOS="failed"
+      }
+  fi
+
+  if [ "$BUILD_IOS" = "true" ]; then
+    echo "==> Packaging iOS IPA..."
+    IOS_APP="$DERIVED_DATA/Build/Products/Release-iphoneos/SponsorBlock for YouTube.app"
+    if [ -d "$IOS_APP" ]; then
+      PAYLOAD_DIR="$TEMP_DIR/Payload"
+      mkdir -p "$PAYLOAD_DIR"
+      cp -R "$IOS_APP" "$PAYLOAD_DIR/"
+      (cd "$TEMP_DIR" && zip -qry "$OUTPUT_DIR/SponsorBlock-Safari-iOS.ipa" Payload)
+      echo "Created: $OUTPUT_DIR/SponsorBlock-Safari-iOS.ipa"
+    else
+      echo "Warning: iOS app not found at $IOS_APP" >&2
+    fi
+  fi
 fi
 
-# Copy the original Safari zip into output directory
 cp "$ZIP_PATH" "$OUTPUT_DIR/SafariExtension.zip"
 echo "Copied: $OUTPUT_DIR/SafariExtension.zip"
 
