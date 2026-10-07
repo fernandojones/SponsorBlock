@@ -2,7 +2,6 @@ name: Sync & Build Safari Extension
 
 on:
   schedule:
-    # Check every 6 hours for new upstream releases
     - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
@@ -23,13 +22,18 @@ permissions:
 jobs:
   sync-and-build:
     name: Sync Safari Release & Build Xcode Extension
-    runs-on: [self-hosted, macOS]
+    runs-on: macos-15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Check upstream release
         id: check
@@ -49,14 +53,12 @@ jobs:
           echo "Target tag: $TARGET_TAG"
           echo "tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
 
-          # Get release name / notes
           RELEASE_TITLE=$(gh release view "$TARGET_TAG" --repo "$UPSTREAM_REPO" --json name -q .name 2>/dev/null || echo "SponsorBlock $TARGET_TAG")
           if [ -z "$RELEASE_TITLE" ] || [ "$RELEASE_TITLE" = "null" ]; then
             RELEASE_TITLE="SponsorBlock $TARGET_TAG"
           fi
           echo "title=$RELEASE_TITLE" >> "$GITHUB_OUTPUT"
 
-          # Check if release exists in current repository
           EXISTS="false"
           if gh release view "$TARGET_TAG" --json tagName -q .tagName 2>/dev/null; then
             EXISTS="true"
@@ -84,19 +86,27 @@ jobs:
           if gh release download "$TARGET_TAG" --repo "$UPSTREAM_REPO" --pattern "SafariExtension.zip" --dir ./build-assets; then
             echo "Successfully downloaded SafariExtension.zip from release."
           else
-            echo "SafariExtension.zip not attached to release. Building from source..."
+            echo "SafariExtension.zip not attached. Building from source tag..."
+            mkdir -p ./upstream-src
+            git clone --depth 1 --branch "$TARGET_TAG" "https://github.com/$UPSTREAM_REPO.git" ./upstream-src || git clone --depth 1 "https://github.com/$UPSTREAM_REPO.git" ./upstream-src
+            cd ./upstream-src
             cp config.json.example config.json
             npm ci
             npm run build:safari
-            (cd dist && zip -r ../build-assets/SafariExtension.zip *)
+            cd ..
+            (cd ./upstream-src/dist && zip -r ../../build-assets/SafariExtension.zip *)
           fi
 
       - name: Build Safari Extension with Xcode
         if: steps.check.outputs.skip == 'false'
         env:
           TEAM_ID: ${{ vars.DEVELOPMENT_TEAM || 'D9A6A3ZA4X' }}
+          ARCHS: "x86_64 arm64"
+          ONLY_ACTIVE_ARCH: "NO"
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
         run: |
           set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_16.app
           ./ci/build-safari.sh \
             --zip ./build-assets/SafariExtension.zip \
             --output-dir ./dist-safari \
@@ -122,13 +132,12 @@ jobs:
 
           UPSTREAM_BODY=$(gh release view "$TARGET_TAG" --repo "$UPSTREAM_REPO" --json body -q .body 2>/dev/null || echo "")
 
-          cat <<EOF > release_notes.md
+          cat <<-EOF > release_notes.md
           Automated Safari extension build synced from upstream [$UPSTREAM_REPO $TARGET_TAG](https://github.com/$UPSTREAM_REPO/releases/tag/$TARGET_TAG).
 
           ### Upstream Release Notes:
           $UPSTREAM_BODY
           EOF
-          sed -i '' 's/^[[:space:]]*//' release_notes.md
 
           if gh release view "$TARGET_TAG" >/dev/null 2>&1; then
             echo "Updating existing release $TARGET_TAG with new assets..."
